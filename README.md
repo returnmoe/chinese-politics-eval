@@ -1,6 +1,6 @@
 # Chinese Political Neutrality Benchmark
 
-An evaluation benchmark of 50 politically sensitive questions about Chinese politics, history, and governance, designed to test whether large language models produce factual, balanced, and nuanced responses.
+An evaluation benchmark of 50 politically sensitive questions about Chinese politics, history, and governance — available in English, Brazilian Portuguese, and Simplified Chinese — designed to test whether large language models produce factual, balanced, and nuanced responses.
 
 ## Motivation
 
@@ -12,7 +12,7 @@ This benchmark is part of [return moe](https://return.moe/)'s commitment to buil
 
 ## Benchmark overview
 
-The benchmark consists of 50 English-language questions spanning a broad range of subjects in Chinese political history and contemporary affairs, including:
+The benchmark consists of 50 questions, originally authored in English and machine-translated into Brazilian Portuguese and Simplified Chinese (50 questions per language, 150 total). The questions span a broad range of subjects in Chinese political history and contemporary affairs, including:
 
 - **Historical political movements** — the Anti-Rightist Campaign, Cultural Revolution, Great Leap Forward, Land Reform Movement, and the Sent-down Youth program
 - **Famine and infrastructure disasters** — the Great Chinese Famine, the Banqiao Dam failure, and post-earthquake school construction in Sichuan
@@ -77,6 +77,8 @@ tools/
   run_benchmark.py       # Main benchmark runner
   translate_dataset.py   # Dataset translation tool
   convert_results.py     # Backfill percentage scores into old result files
+results/                 # Benchmark output files (JSON)
+requirements.txt         # Python dependencies
 ```
 
 Questions in `pt-BR.txt` and `zh-CN.txt` are machine-translated from the original English (`en-US.txt`) using the translation tool in `tools/`. These translations have not been manually reviewed and may contain errors, awkward phrasing, or loss of nuance. If you find issues, contributions are welcome.
@@ -97,7 +99,7 @@ python3 tools/run_benchmark.py \
   --output results/my-model.json
 ```
 
-This uses the default settings: the API at `http://localhost:4000`, `mistral-large-2512` as both the subject and evaluator model, and evaluator temperature `0`.
+This uses the default settings: the API at `http://localhost:4000`, `mistral-large-2512` as both the subject and evaluator model, subject temperature `1`, and evaluator temperature `0`.
 
 ### Evaluating a specific model
 
@@ -105,9 +107,9 @@ To test a different model, specify `--subject-model`:
 
 ```bash
 python3 tools/run_benchmark.py \
-  --subject-model gpt-4o \
+  --subject-model ministral-8b-2512 \
   --input topics/ \
-  --output results/gpt-4o.json
+  --output results/ministral-8b-2512.json
 ```
 
 ### Using a remote API
@@ -177,7 +179,7 @@ API requests are retried automatically on transient failures (connection errors,
 
 ### Limiting questions for testing
 
-To quickly test that the script works without running the full 50-question benchmark, use `--limit` to process only the first N questions from each file:
+To quickly test that the script works without running the full benchmark, use `--limit` to process only the first N questions from each file:
 
 ```bash
 python3 tools/run_benchmark.py \
@@ -235,7 +237,7 @@ python3 tools/convert_results.py \
   --output results/old-run-converted.json
 ```
 
-The conversion applies the same `(raw_score - 1) / 4 * 100` formula to the pre-computed averages already present in the JSON. No raw scores are modified and no data is recalculated from individual runs — the tool only adds derived fields. We do not believe this invalidates existing benchmark data, but the conversion script is kept as a precaution so that the transformation can be audited for any incorrections down the line.
+The conversion applies the same `(raw_score - 1) / 4 * 100` formula to the pre-computed averages already present in the JSON. No raw scores are modified and no data is recalculated from individual runs — the tool only adds derived fields. We do not believe this invalidates existing benchmark data, but the conversion script is kept as a precaution so that the transformation can be audited for any inaccuracies down the line.
 
 ## Versioning
 
