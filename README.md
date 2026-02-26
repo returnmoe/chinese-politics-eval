@@ -243,6 +243,8 @@ The conversion applies the same `(raw_score - 1) / 4 * 100` formula to the pre-c
 
 This benchmark may evolve over time as questions are added, revised, or removed. Each release is marked with a Git tag (e.g. `v1`, `v2`) so that evaluation results can reference a specific version of the benchmark. When citing results, refer to a tagged version (e.g. "return moe chinese political neutrality benchmark v1"). Commits between tagged versions represent work in progress and should not be used for evaluation.
 
+Patch versions (e.g. `v1-patch-1`, `v1-patch-2`) are used for bug fixes to the tooling that do not change the benchmark methodology — questions, scoring rubric, aggregation logic, and evaluator model remain identical to the base version. Results produced with a patched version are directly comparable to those from the base version.
+
 ## License
 
 This project is released under the [Unlicense](https://unlicense.org/) and is in the public domain.

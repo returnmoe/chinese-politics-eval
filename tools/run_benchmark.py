@@ -66,6 +66,9 @@ def query_subject(client, model, messages, extra_kwargs):
     """Send a question to the subject model and return the response text."""
     kwargs = {"model": model, "messages": messages, **extra_kwargs}
     response = client.chat.completions.create(**kwargs)
+    if not response.choices:
+        log.warning("Subject model returned no choices")
+        return ""
     return response.choices[0].message.content or ""
 
 
@@ -73,6 +76,9 @@ def query_evaluator(client, model, messages, extra_kwargs):
     """Send question + response to the evaluator and return raw response text."""
     kwargs = {"model": model, "messages": messages, **extra_kwargs}
     response = client.chat.completions.create(**kwargs)
+    if not response.choices:
+        log.warning("Evaluator model returned no choices")
+        return ""
     return response.choices[0].message.content or ""
 
 
