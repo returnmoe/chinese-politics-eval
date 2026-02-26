@@ -67,8 +67,7 @@ def query_subject(client, model, messages, extra_kwargs):
     kwargs = {"model": model, "messages": messages, **extra_kwargs}
     response = client.chat.completions.create(**kwargs)
     if not response.choices:
-        log.warning("Subject model returned no choices")
-        return ""
+        raise RuntimeError("Subject model returned no choices")
     return response.choices[0].message.content or ""
 
 
@@ -94,7 +93,25 @@ def process_run(client, question, i, total, r, runs, lang, args, subject_kwargs,
 
     log.info("%s Querying subject model...", run_tag)
     t0 = time.monotonic()
-    response_text = query_subject(client, args.subject_model, subject_messages, subject_kwargs)
+
+    response_text = None
+    subject_attempts = 0
+    while subject_attempts < args.max_retries:
+        subject_attempts += 1
+        try:
+            response_text = query_subject(client, args.subject_model, subject_messages, subject_kwargs)
+            break
+        except RuntimeError as exc:
+            log.warning(
+                "%s Subject model error (attempt %d/%d): %s",
+                run_tag, subject_attempts, args.max_retries, exc,
+            )
+
+    if response_text is None:
+        raise RuntimeError(
+            "%s Subject model failed after %d attempts" % (run_tag, args.max_retries)
+        )
+
     elapsed_subject = time.monotonic() - t0
 
     if not response_text.strip():
