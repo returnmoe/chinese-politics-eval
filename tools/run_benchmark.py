@@ -222,6 +222,7 @@ def process_file(client, file_path, lang, args, subject_kwargs, evaluator_kwargs
 
     # Reassemble into nested structure: questions -> runs
     question_results = []
+    raw_mean_scores = []
     for i, question in work:
         run_list = [run_results[(i, r)] for r in range(1, runs + 1)]
         valid_scores = [run["score"] for run in run_list if run["score"] is not None]
@@ -232,20 +233,21 @@ def process_file(client, file_path, lang, args, subject_kwargs, evaluator_kwargs
             "question": question,
             "runs": run_list,
             "mean_score": mean_score_rounded,
-            "mean_score_percentage": score_to_percentage(mean_score_rounded),
+            "mean_score_percentage": score_to_percentage(mean_score),
             "score_stddev": round(score_stddev, 2) if score_stddev is not None else None,
         })
+        if mean_score is not None:
+            raw_mean_scores.append(mean_score)
 
     # Per-language average: mean of all questions' mean_score values
-    mean_scores = [q["mean_score"] for q in question_results if q["mean_score"] is not None]
-    avg = sum(mean_scores) / len(mean_scores) if mean_scores else None
+    avg = sum(raw_mean_scores) / len(raw_mean_scores) if raw_mean_scores else None
 
     avg_rounded = round(avg, 2) if avg is not None else None
 
     if avg is not None:
         log.info(
             "[%s] Finished — %d questions, average score: %.2f / 5 (%.1f%%)",
-            lang, total, avg, score_to_percentage(avg_rounded),
+            lang, total, avg, score_to_percentage(avg),
         )
     else:
         log.info("[%s] Finished — %d questions, no valid scores", lang, total)
@@ -253,7 +255,7 @@ def process_file(client, file_path, lang, args, subject_kwargs, evaluator_kwargs
     return {
         "questions": question_results,
         "average_score": avg_rounded,
-        "average_score_percentage": score_to_percentage(avg_rounded),
+        "average_score_percentage": score_to_percentage(avg),
     }, errors
 
 
@@ -269,17 +271,19 @@ def build_and_write_output(all_results, all_errors, args, files_expected, files_
         )
         summary_languages[lang] = {
             "average_score": lang_data["average_score"],
-            "average_score_percentage": score_to_percentage(lang_data["average_score"]),
+            "average_score_percentage": lang_data["average_score_percentage"],
             "questions": len(lang_data["questions"]),
             "errors": lang_error_count,
         }
 
     lang_averages = [v["average_score"] for v in summary_languages.values() if v["average_score"] is not None]
     overall_average = round(sum(lang_averages) / len(lang_averages), 2) if lang_averages else None
+    lang_percentages = [v["average_score_percentage"] for v in summary_languages.values() if v["average_score_percentage"] is not None]
+    overall_percentage = round(sum(lang_percentages) / len(lang_percentages), 2) if lang_percentages else None
 
     summary = {
         "overall_average_score": overall_average,
-        "overall_average_score_percentage": score_to_percentage(overall_average),
+        "overall_average_score_percentage": overall_percentage,
         "languages": summary_languages,
     }
 
