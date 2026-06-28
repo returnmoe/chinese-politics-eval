@@ -1,1 +1,2 @@
 openai>=2.22.0,<3
+python-dotenv>=1.2.2,<2

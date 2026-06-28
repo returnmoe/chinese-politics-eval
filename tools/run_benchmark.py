@@ -3,6 +3,7 @@
 import argparse
 import json
 import logging
+import os
 import re
 import statistics
 import time
@@ -10,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 
+from dotenv import load_dotenv
 from openai import OpenAI
 
 EVALUATOR_SYSTEM_PROMPT = """\
@@ -81,7 +83,7 @@ def query_evaluator(client, model, messages, extra_kwargs):
     return response.choices[0].message.content or ""
 
 
-def process_run(client, question, i, total, r, runs, lang, args, subject_kwargs, evaluator_kwargs, evaluator_system_prompt):
+def process_run(subject_client, evaluator_client, question, i, total, r, runs, lang, args, subject_kwargs, evaluator_kwargs, evaluator_system_prompt):
     """Process a single (question, run) pair: query subject, then evaluate. Returns a run result dict."""
     run_tag = "[%s] [%d/%d] [run %d/%d]" % (lang, i, total, r, runs)
 
@@ -99,7 +101,7 @@ def process_run(client, question, i, total, r, runs, lang, args, subject_kwargs,
     while subject_attempts < args.max_retries:
         subject_attempts += 1
         try:
-            response_text = query_subject(client, args.subject_model, subject_messages, subject_kwargs)
+            response_text = query_subject(subject_client, args.subject_model, subject_messages, subject_kwargs)
             break
         except RuntimeError as exc:
             log.warning(
@@ -143,7 +145,7 @@ def process_run(client, question, i, total, r, runs, lang, args, subject_kwargs,
     while attempts < max_attempts:
         attempts += 1
         raw = query_evaluator(
-            client, args.evaluator_model, evaluator_messages, evaluator_kwargs,
+            evaluator_client, args.evaluator_model, evaluator_messages, evaluator_kwargs,
         )
         try:
             _, score = parse_evaluator_response(raw)
@@ -182,7 +184,7 @@ def process_run(client, question, i, total, r, runs, lang, args, subject_kwargs,
     }, error
 
 
-def process_file(client, file_path, lang, args, subject_kwargs, evaluator_kwargs, evaluator_system_prompt):
+def process_file(subject_client, evaluator_client, file_path, lang, args, subject_kwargs, evaluator_kwargs, evaluator_system_prompt):
     """Process a single question file and return (results_dict, errors_list) for that language."""
     text = Path(file_path).read_text(encoding="utf-8")
     questions = text.splitlines()
@@ -207,7 +209,7 @@ def process_file(client, file_path, lang, args, subject_kwargs, evaluator_kwargs
         for i, question in work:
             for r in range(1, runs + 1):
                 future = executor.submit(
-                    process_run, client, question, i, total, r, runs, lang,
+                    process_run, subject_client, evaluator_client, question, i, total, r, runs, lang,
                     args, subject_kwargs, evaluator_kwargs, evaluator_system_prompt,
                 )
                 futures[future] = (i, r, question)
@@ -291,13 +293,16 @@ def build_and_write_output(all_results, all_errors, args, files_expected, files_
     output = {
         "metadata": {
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "api_base_url": args.api_base_url,
+            "subject_api_base_url": args.subject_api_base_url,
+            "subject_project": args.subject_project,
             "subject_model": args.subject_model,
             "subject_temperature": args.subject_temperature,
             "subject_top_p": args.subject_top_p,
             "subject_top_k": args.subject_top_k,
             "subject_max_tokens": args.subject_max_tokens,
             "subject_system_prompt": args.subject_system_prompt,
+            "evaluator_api_base_url": args.evaluator_api_base_url,
+            "evaluator_project": args.evaluator_project,
             "evaluator_model": args.evaluator_model,
             "evaluator_temperature": args.evaluator_temperature,
             "evaluator_top_p": args.evaluator_top_p,
@@ -322,21 +327,14 @@ def build_and_write_output(all_results, all_errors, args, files_expected, files_
 
 
 def main():
+    # Load .env (if present) so credentials can be supplied without CLI flags.
+    load_dotenv()
+
     parser = argparse.ArgumentParser(
         description="Run the Chinese politics benchmark: query a subject model and evaluate responses."
     )
 
-    # Connection
-    parser.add_argument(
-        "--api-base-url",
-        default="http://localhost:4000",
-        help="OpenAI-compatible API base URL (default: http://localhost:4000)",
-    )
-    parser.add_argument(
-        "--api-key",
-        default=None,
-        help="API auth token (default: None, falls back to 'unused')",
-    )
+    # Connection (shared)
     parser.add_argument(
         "--max-retries",
         type=int,
@@ -345,6 +343,22 @@ def main():
     )
 
     # Subject model
+    parser.add_argument(
+        "--subject-api-base-url",
+        required=True,
+        help="OpenAI-compatible API base URL for the subject model",
+    )
+    parser.add_argument(
+        "--subject-api-key",
+        default=None,
+        help="Subject API auth token (default: env SUBJECT_API_KEY, then 'unused')",
+    )
+    parser.add_argument(
+        "--subject-project",
+        default=None,
+        help="Subject OpenAI project header, e.g. 'team/project' for wandb inference "
+             "(default: env SUBJECT_PROJECT; only sent when set)",
+    )
     parser.add_argument(
         "--subject-model",
         default="mistral-large-2512",
@@ -361,6 +375,22 @@ def main():
     )
 
     # Evaluator
+    parser.add_argument(
+        "--evaluator-api-base-url",
+        required=True,
+        help="OpenAI-compatible API base URL for the evaluator model",
+    )
+    parser.add_argument(
+        "--evaluator-api-key",
+        default=None,
+        help="Evaluator API auth token (default: env EVALUATOR_API_KEY, then 'unused')",
+    )
+    parser.add_argument(
+        "--evaluator-project",
+        default=None,
+        help="Evaluator OpenAI project header (default: env EVALUATOR_PROJECT; "
+             "only sent when set)",
+    )
     parser.add_argument(
         "--evaluator-model",
         default="mistral-large-2512",
@@ -418,6 +448,15 @@ def main():
         datefmt="%H:%M:%S",
     )
 
+    # --- Resolve credentials: CLI flag -> env var (.env auto-loaded) -> fallback ---
+    subject_api_key = args.subject_api_key or os.environ.get("SUBJECT_API_KEY")
+    subject_project = args.subject_project or os.environ.get("SUBJECT_PROJECT")
+    evaluator_api_key = args.evaluator_api_key or os.environ.get("EVALUATOR_API_KEY")
+    evaluator_project = args.evaluator_project or os.environ.get("EVALUATOR_PROJECT")
+    # Reflect env-resolved projects in args so metadata records them (never keys).
+    args.subject_project = subject_project
+    args.evaluator_project = evaluator_project
+
     # --- Warn on non-zero evaluator temperature ---
     if args.evaluator_temperature != 0:
         log.warning(
@@ -425,16 +464,18 @@ def main():
             args.evaluator_temperature,
         )
 
-    # --- Log resolved parameters ---
-    log.info("Connection: api_base_url=%s max_retries=%d", args.api_base_url, args.max_retries)
+    # --- Log resolved parameters (never log API keys) ---
+    log.info("Connection: max_retries=%d", args.max_retries)
     log.info(
-        "Subject: model=%s temperature=%s top_p=%s top_k=%s max_tokens=%s system_prompt=%s",
+        "Subject: base_url=%s project=%s model=%s temperature=%s top_p=%s top_k=%s max_tokens=%s system_prompt=%s",
+        args.subject_api_base_url, subject_project or None,
         args.subject_model, args.subject_temperature, args.subject_top_p,
         args.subject_top_k, args.subject_max_tokens,
         repr(args.subject_system_prompt) if args.subject_system_prompt else None,
     )
     log.info(
-        "Evaluator: model=%s temperature=%s top_p=%s top_k=%s max_tokens=%s system_prompt=%s",
+        "Evaluator: base_url=%s project=%s model=%s temperature=%s top_p=%s top_k=%s max_tokens=%s system_prompt=%s",
+        args.evaluator_api_base_url, evaluator_project or None,
         args.evaluator_model, args.evaluator_temperature, args.evaluator_top_p,
         args.evaluator_top_k, args.evaluator_max_tokens,
         "custom" if args.evaluator_system_prompt else "built-in",
@@ -472,11 +513,18 @@ def main():
 
     evaluator_system_prompt = args.evaluator_system_prompt or EVALUATOR_SYSTEM_PROMPT
 
-    # --- Client ---
-    client = OpenAI(
-        base_url=args.api_base_url,
-        api_key=args.api_key if args.api_key else "unused",
+    # --- Clients (subject and evaluator may use different providers) ---
+    subject_client = OpenAI(
+        base_url=args.subject_api_base_url,
+        api_key=subject_api_key or "unused",
         max_retries=args.max_retries,
+        **({"project": subject_project} if subject_project else {}),
+    )
+    evaluator_client = OpenAI(
+        base_url=args.evaluator_api_base_url,
+        api_key=evaluator_api_key or "unused",
+        max_retries=args.max_retries,
+        **({"project": evaluator_project} if evaluator_project else {}),
     )
 
     # --- Discover input files ---
@@ -498,7 +546,7 @@ def main():
     files_expected = len(files)
     for files_completed, file_path in enumerate(files, start=1):
         lang = file_path.stem
-        lang_results, lang_errors = process_file(client, file_path, lang, args, subject_kwargs, evaluator_kwargs, evaluator_system_prompt)
+        lang_results, lang_errors = process_file(subject_client, evaluator_client, file_path, lang, args, subject_kwargs, evaluator_kwargs, evaluator_system_prompt)
         all_results[lang] = lang_results
         all_errors.extend(lang_errors)
         build_and_write_output(all_results, all_errors, args, files_expected, files_completed, args.output_path)

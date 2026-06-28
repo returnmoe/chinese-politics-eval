@@ -79,6 +79,7 @@ tools/
   convert_results.py     # Backfill percentage scores into old result files
 results/                 # Benchmark output files (JSON)
 requirements.txt         # Python dependencies
+.env.example             # Template for credentials (copy to .env)
 ```
 
 Questions in `pt-BR.txt` and `zh-CN.txt` are machine-translated from the original English (`en-US.txt`) using the translation tool in `tools/`. These translations have not been manually reviewed and may contain errors, awkward phrasing, or loss of nuance. If you find issues, contributions are welcome.
@@ -87,7 +88,32 @@ Questions in `pt-BR.txt` and `zh-CN.txt` are machine-translated from the origina
 
 The benchmark is run using `tools/run_benchmark.py`, which sends each question to a **subject model** (the model being tested), then passes the question and response to an **evaluator model** that scores the response on a 1–5 scale for political neutrality, factual accuracy, balance, and nuance. Results are written to a JSON file.
 
-The script requires Python 3 and the `openai` package. It communicates with any OpenAI-compatible API endpoint.
+The script requires Python 3 and the packages in `requirements.txt` (`openai` and `python-dotenv`). Install them with `pip install -r requirements.txt`. The subject and evaluator each communicate with any OpenAI-compatible API endpoint, and the two can be **different providers**.
+
+### Credentials and providers
+
+The subject model and the evaluator model are configured independently, so you can, for example, test a model hosted on one provider while scoring with an evaluator on another. Two flags are **required** on every run:
+
+- `--subject-api-base-url` — OpenAI-compatible base URL for the subject model
+- `--evaluator-api-base-url` — OpenAI-compatible base URL for the evaluator model
+
+API keys (and optional OpenAI `project` headers) are supplied via environment variables so they never appear in shell history or process listings. The script auto-loads a `.env` file from the working directory. Copy the template and fill it in:
+
+```bash
+cp .env.example .env
+# then edit .env
+```
+
+| Variable | Used for |
+|----------|----------|
+| `SUBJECT_API_KEY` | Auth token for the subject provider |
+| `SUBJECT_PROJECT` | Subject `project` header (e.g. `team/project`, required by wandb inference) — only sent when set |
+| `EVALUATOR_API_KEY` | Auth token for the evaluator provider |
+| `EVALUATOR_PROJECT` | Evaluator `project` header — only sent when set |
+
+Each variable can also be overridden on the command line (`--subject-api-key`, `--subject-project`, `--evaluator-api-key`, `--evaluator-project`); the CLI flag takes precedence over the environment variable. If no key is provided, it falls back to the literal `"unused"` (useful for local servers that ignore auth).
+
+> The examples below omit the required `--subject-api-base-url` / `--evaluator-api-base-url` flags and assume keys are set in `.env`, for brevity.
 
 ### Basic usage
 
@@ -95,35 +121,31 @@ Run the benchmark against all three language files at once by pointing `--input`
 
 ```bash
 python3 tools/run_benchmark.py \
+  --subject-api-base-url https://api.example.com/v1 \
+  --subject-model my-model \
+  --evaluator-api-base-url https://api.example.com/v1 \
+  --evaluator-model mistral-large-2512 \
   --input topics/ \
   --output results/my-model.json
 ```
 
-This uses the default settings: the API at `http://localhost:4000`, `mistral-large-2512` as both the subject and evaluator model, subject temperature `1`, and evaluator temperature `0`.
+The subject model defaults to `mistral-large-2512` (as does the evaluator), subject temperature defaults to `1`, and evaluator temperature to `0`.
 
-### Evaluating a specific model
+### Two providers: wandb subject, OpenRouter evaluator
 
-To test a different model, specify `--subject-model`:
-
-```bash
-python3 tools/run_benchmark.py \
-  --subject-model ministral-8b-2512 \
-  --input topics/ \
-  --output results/ministral-8b-2512.json
-```
-
-### Using a remote API
-
-If your API endpoint requires authentication or runs on a different URL:
+To test a model served by wandb inference while scoring with Mistral on OpenRouter, set `SUBJECT_API_KEY`, `SUBJECT_PROJECT`, and `EVALUATOR_API_KEY` in `.env`, then:
 
 ```bash
 python3 tools/run_benchmark.py \
-  --api-base-url https://api.example.com/v1 \
-  --api-key sk-your-key-here \
-  --subject-model some-model \
+  --subject-api-base-url https://api.inference.wandb.ai/v1 \
+  --subject-model zai-org/GLM-5.2 \
+  --evaluator-api-base-url https://openrouter.ai/api/v1 \
+  --evaluator-model mistralai/mistral-large \
   --input topics/ \
-  --output results/some-model.json
+  --output results/glm-5.2.json
 ```
+
+(Replace the model IDs with the exact identifiers your providers expose.)
 
 ### Single language file
 
